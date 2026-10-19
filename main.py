@@ -134,15 +134,13 @@ CHEF_SPECIAL_PRICE_MULTIPLAYER = 0.1
 DEFAULT_CHEF_CHANCE = 0.03
 
 THEME = [
-    DishQuality.SWEET,
+    DishQuality.SPICY_AROMATIC,
+    DishType.SOUP,
 ]
 
 
 def suggest_best():
-    themed_dishes_list = [dish for dish in DISHES_LIST if matches_theme(dish, THEME)]
-
-    if not themed_dishes_list:
-        return None
+    all_dishes = DISHES_LIST
 
     selected_workers_list = WORKERS_LIST[:min(len(WORKERS_LIST), 6)]
 
@@ -158,10 +156,17 @@ def suggest_best():
         'kitchens': []
     }
 
+    # Для отслеживания использованных блюд (чтобы не повторялись)
+    used_dish_names = set()
+
     for kitchen_idx, kitchen_workers_list in enumerate(kitchens):
         suitable_dishes_list = []
 
-        for dish in themed_dishes_list:
+        for dish in all_dishes:
+            # Пропускаем блюдо, если оно уже выбрано для другой кухни
+            if dish.name in used_dish_names:
+                continue
+
             if kitchen_workers_list:
                 suitable = False
                 for worker in kitchen_workers_list:
@@ -175,7 +180,11 @@ def suggest_best():
             cooking_time = dish.cooking_time
             base_price = dish.price
 
-            theme_bonus = base_price * 0.1
+            # Проверяем тему для бонуса цены
+            theme_bonus = 0
+            if matches_theme(dish, THEME):
+                theme_matches = count_theme_matches(dish, THEME)
+                theme_bonus = base_price * 0.1 * theme_matches
 
             chef_chance = DEFAULT_CHEF_CHANCE
 
@@ -197,7 +206,9 @@ def suggest_best():
                         chef_chance += 0.05
 
                     # Проверяем, является ли этот работник шефом
-                    if worker.type1 == DishType.CHEF_SPECIAL or worker.type2 == DishType.CHEF_SPECIAL:
+                    if worker.type1 == DishType.CHEF_SPECIAL:
+                        chef_chance += 0.05
+                    if worker.type2 == DishType.CHEF_SPECIAL:
                         chef_chance += 0.05
 
                 cooking_time *= (1 - time_discount)
@@ -217,7 +228,10 @@ def suggest_best():
             })
 
         suitable_dishes_list.sort(key=lambda x: x['score'], reverse=True)
-        top_3 = suitable_dishes_list[:3]
+
+        # Берем лучшее блюдо для этой кухни (топ-1, чтобы избежать повторов в рамках логики выбора)
+        # Или можно топ-3, но тогда нужно проверять уникальность внутри кухни тоже
+        top_dishes = suitable_dishes_list[:3]
 
         kitchen_info = {
             'kitchen_number': kitchen_idx + 1,
@@ -225,7 +239,10 @@ def suggest_best():
             'top_DISHES_LIST': []
         }
 
-        for dish_info in top_3:
+        for dish_info in top_dishes:
+            # Добавляем имя блюда в использованные
+            used_dish_names.add(dish_info['dish'].name)
+
             kitchen_info['top_DISHES_LIST'].append({
                 'name': dish_info['dish'].name,
                 'type': dish_info['dish'].dish_type.value,
@@ -241,6 +258,20 @@ def suggest_best():
 
     return result
 
+
+def count_theme_matches(dish, theme_tags):
+    """Считает количество совпадений блюда с темой"""
+    matches = 0
+    for tag in theme_tags:
+        if isinstance(tag, DishQuality):
+            if dish.quality1 == tag:
+                matches += 1
+            if dish.quality2 == tag:
+                matches += 1
+        elif isinstance(tag, DishType):
+            if dish.dish_type == tag:
+                matches += 1
+    return matches
 
 def matches_theme(dish, theme_tags):
     """Проверяет, соответствует ли блюдо теме"""
