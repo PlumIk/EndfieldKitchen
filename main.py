@@ -130,40 +130,72 @@ WORKERS_LIST = [
     Worker("Сайхи", DishType.DESSERT, DishType.CHEF_SPECIAL, DishQuality.SPICY_AROMATIC),
 ]
 
-CHEF_SPECIAL_PRICE_MULTIPLAYER = 0.1
+CHEF_SPECIAL_PRICE_MULTIPLAYER = 0.0
 DEFAULT_CHEF_CHANCE = 0.03
 
 THEME = [
-    DishQuality.SPICY_AROMATIC,
-    DishType.SOUP,
+    DishQuality.MEAT,
 ]
+
+
+def find_best_workers(all_dishes, theme_tags):
+    """Находит лучших 6 работников на основе темы и доступных блюд"""
+    themed_dishes = [dish for dish in all_dishes if matches_theme(dish, theme_tags)]
+
+    if not themed_dishes:
+        return []
+
+    worker_scores = []
+
+    for worker in WORKERS_LIST:
+        score = 0
+
+        for dish in themed_dishes:
+            if dish.dish_type == worker.type1 or dish.dish_type == worker.type2:
+                score += 1
+
+                if dish.quality1 == worker.quality or dish.quality2 == worker.quality:
+                    score += 0.5
+
+            chef_count = 0
+            if worker.type1 == DishType.CHEF_SPECIAL:
+                chef_count += 1
+            if worker.type2 == DishType.CHEF_SPECIAL:
+                chef_count += 1
+
+            score += 0.3 * chef_count
+
+        worker_scores.append((worker, score))
+
+    worker_scores.sort(key=lambda x: x[1], reverse=True)
+
+    return [w[0] for w in worker_scores[:6]]
 
 
 def suggest_best():
     all_dishes = DISHES_LIST
 
-    selected_workers_list = WORKERS_LIST[:min(len(WORKERS_LIST), 6)]
-
-    kitchens = []
-    for i in range(0, min(len(selected_workers_list), 6), 2):
-        kitchen_workers_list = selected_workers_list[i:i + 2]
-        kitchens.append(kitchen_workers_list)
-
-    while len(kitchens) < 3:
-        kitchens.append([])
-
     result = {
         'kitchens': []
     }
 
-    # Для отслеживания использованных блюд (чтобы не повторялись)
     used_dish_names = set()
 
-    for kitchen_idx, kitchen_workers_list in enumerate(kitchens):
+    # Выбираем топ-6 работников сразу
+    best_workers = find_best_workers(all_dishes, THEME)
+
+    # Распределяем по кухням
+    kitchens_workers = []
+    for i in range(0, min(len(best_workers), 6), 2):
+        kitchens_workers.append(best_workers[i:i + 2])
+
+    while len(kitchens_workers) < 3:
+        kitchens_workers.append([])
+
+    for kitchen_idx, kitchen_workers_list in enumerate(kitchens_workers):
         suitable_dishes_list = []
 
         for dish in all_dishes:
-            # Пропускаем блюдо, если оно уже выбрано для другой кухни
             if dish.name in used_dish_names:
                 continue
 
@@ -180,24 +212,18 @@ def suggest_best():
             cooking_time = dish.cooking_time
             base_price = dish.price
 
-            # Проверяем тему для бонуса цены
-            theme_bonus = 0
-            if matches_theme(dish, THEME):
-                theme_matches = count_theme_matches(dish, THEME)
-                theme_bonus = base_price * 0.1 * theme_matches
+            theme_matches = count_theme_matches(dish, THEME)
+            theme_bonus = base_price * 0.1 * theme_matches
 
             chef_chance = DEFAULT_CHEF_CHANCE
+            time_discount = 0
 
             if kitchen_workers_list:
-                time_discount = 0
-
                 for worker in kitchen_workers_list:
-                    # Проверяем совпадение типа для этого работника
                     type_match = (dish.dish_type == worker.type1 or dish.dish_type == worker.type2)
                     if type_match:
                         time_discount += 0.1
 
-                    # Проверяем совпадение качества для этого работника
                     quality_match = (dish.quality1 == worker.quality or
                                      dish.quality2 == worker.quality)
 
@@ -205,15 +231,16 @@ def suggest_best():
                         time_discount += 0.05
                         chef_chance += 0.05
 
-                    # Проверяем, является ли этот работник шефом
+                    chef_count = 0
                     if worker.type1 == DishType.CHEF_SPECIAL:
-                        chef_chance += 0.05
+                        chef_count += 1
                     if worker.type2 == DishType.CHEF_SPECIAL:
-                        chef_chance += 0.05
+                        chef_count += 1
+
+                    chef_chance += 0.05 * chef_count
 
                 cooking_time *= (1 - time_discount)
 
-            # Бонус от шефа = базовая цена * шанс * модификатор
             chef_bonus = base_price * chef_chance * CHEF_SPECIAL_PRICE_MULTIPLAYER
 
             final_price = base_price + theme_bonus + chef_bonus
@@ -228,9 +255,6 @@ def suggest_best():
             })
 
         suitable_dishes_list.sort(key=lambda x: x['score'], reverse=True)
-
-        # Берем лучшее блюдо для этой кухни (топ-1, чтобы избежать повторов в рамках логики выбора)
-        # Или можно топ-3, но тогда нужно проверять уникальность внутри кухни тоже
         top_dishes = suitable_dishes_list[:3]
 
         kitchen_info = {
@@ -240,7 +264,6 @@ def suggest_best():
         }
 
         for dish_info in top_dishes:
-            # Добавляем имя блюда в использованные
             used_dish_names.add(dish_info['dish'].name)
 
             kitchen_info['top_DISHES_LIST'].append({
@@ -257,7 +280,6 @@ def suggest_best():
         result['kitchens'].append(kitchen_info)
 
     return result
-
 
 def count_theme_matches(dish, theme_tags):
     """Считает количество совпадений блюда с темой"""
